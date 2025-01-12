@@ -6,6 +6,9 @@
 #include "esp_timer.h"
 #include "math.h"
 #include "esp_check.h"
+#include "limit_switch.h"
+#include "stdatomic.h"
+#include "homing.h"
 
 #define TAG "MAIN"
 
@@ -14,15 +17,20 @@
 #define M2_STEP GPIO_NUM_22 // orange
 #define M2_DIR GPIO_NUM_23  // yellow
 
+#define LEFT_LIMIT_SWITCH GPIO_NUM_16
+#define RIGHT_LIMIT_SWITCH GPIO_NUM_17
+#define M1_LIMIT_SWITCH GPIO_NUM_21
+
 void app_main(void)
 {
-    // Set up GPIO for the motor
+    // set up gpio for the motor
     gpio_config_t motor_gpio_config = {
         .pin_bit_mask = (1ULL << M1_STEP) | (1ULL << M1_DIR) | (1ULL << M2_STEP) | (1ULL << M2_DIR),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE};
+        .intr_type = GPIO_INTR_DISABLE
+    };
     gpio_config(&motor_gpio_config);
 
     // set up motors on heap
@@ -35,13 +43,24 @@ void app_main(void)
     ESP_ERROR_CHECK(create_motor(m2, 1.8, SIXTEENTH_STEP, M2_STEP, M2_DIR));
     ESP_ERROR_CHECK(create_arm_linkage(arm, m1, m2, 150, 150));
 
-    // test motors
-    ESP_LOGI(TAG, "m1 to 90");
-    ESP_ERROR_CHECK(move_motor_to(m1, .5, 90, false, NULL));
-    vTaskDelay(1500/portTICK_PERIOD_MS);
-    ESP_LOGI(TAG, "m1 to 180");
-    ESP_ERROR_CHECK(move_motor_to(m1, 1, -90, true, NULL));
-    ESP_ERROR_CHECK(move_motor_to(m1, 1, 0, true, NULL));
+    // set up limit switches
+    limit_switch_t *left_limit_switch = malloc(sizeof(limit_switch_t));
+    limit_switch_t *right_limit_switch = malloc(sizeof(limit_switch_t));
+    limit_switch_t *m1_limit_switch = malloc(sizeof(limit_switch_t));
+    limit_switch_init(left_limit_switch, LEFT_LIMIT_SWITCH, NULL);
+    limit_switch_init(right_limit_switch, RIGHT_LIMIT_SWITCH, NULL);
+    limit_switch_init(m1_limit_switch, M1_LIMIT_SWITCH, NULL);
 
+    // home motors
+    home_all_motors(m1, m2, left_limit_switch, right_limit_switch, m1_limit_switch);
+
+    // move arm
+    move_motor_to(m1, 1, 90, false, NULL);
+
+    move_arm_to(arm, 150, 150);
+    move_arm_to(arm, 0, 150);
+    move_arm_to(arm, 150, 0);
 }
+
+
     

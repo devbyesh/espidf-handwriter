@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdatomic.h>
+#include "freertos/FreeRTOS.h"
 
 
 typedef struct {
@@ -28,6 +29,8 @@ typedef struct {
     esp_timer_handle_t* handle;
     TaskHandle_t calling_task_handle;
     atomic_bool can_move;
+
+    bool debug;
     
 } motor_timer_cb_params_t;
 
@@ -60,4 +63,7 @@ esp_err_t move_motor_for(motor_t *m, float speed, uint64_t steps, bool do_block,
 esp_err_t move_motor_to(motor_t *m, float speed, float target_angle, bool do_block, TaskHandle_t handle);
 esp_err_t create_arm_linkage(arm_linkage_2dof_t *arm, motor_t *m1, motor_t *m2, float l1, float l2);
 esp_err_t move_arm_to(arm_linkage_2dof_t *arm, float x, float y);
+esp_err_t move_arm_to_angle(arm_linkage_2dof_t *arm, float a1, float a2);
+void e_stop(motor_t *m);
+
 #endif

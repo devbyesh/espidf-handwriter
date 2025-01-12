@@ -151,9 +151,17 @@ esp_err_t move_motor_for(motor_t *m, float speed, uint64_t steps, bool do_block,
     xSemaphoreTake(m->timer_params->move_lock, portMAX_DELAY);
 
     //set goal values
-    m->timer_params->goal_steps = 2 * steps * (speed > 0 ? 1 : -1);
-    m->timer_params->goal_velocity = speed;
+    int64_t required_steps = 2 * steps * (speed > 0 ? 1 : -1);
+    if(llabs(required_steps) < 1){
+        ESP_LOGW(TAG, "Motor already moving to goal");
+        xSemaphoreGive(m->timer_params->move_lock);
+        return ESP_OK;
+    }
+    
+    m->timer_params->goal_steps = required_steps;
     m->timer_params->curr_steps = 0;
+    m->timer_params->goal_velocity = speed;
+
 
     if (do_block) // if blocking, set the calling task handle so the cb function can notify it
     {
@@ -161,7 +169,7 @@ esp_err_t move_motor_for(motor_t *m, float speed, uint64_t steps, bool do_block,
     }
 
     if(handle != NULL){ 
-        if(do_block){
+        if(overwritten_handle == NULL){
             m->timer_params->calling_task_handle = handle;
         } else{
             ESP_LOGW(TAG, "Cannot overwrite calling task handle if not blocking");
@@ -224,6 +232,16 @@ esp_err_t create_arm_linkage(arm_linkage_2dof_t *arm, motor_t *m1, motor_t *m2, 
     return ESP_OK;
 }
 
+esp_err_t move_arm_to_angle(arm_linkage_2dof_t *arm, float a1, float a2){
+    ESP_LOGI(TAG, "a1: %f, a2: %f", a1, a2);
+    ESP_ERROR_CHECK(move_motor_to(arm->m1, 1, a1, false, xTaskGetCurrentTaskHandle()));
+    ESP_ERROR_CHECK(move_motor_to(arm->m2, 1, a2, false, xTaskGetCurrentTaskHandle()));
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    return ESP_OK;
+}
+
 esp_err_t move_arm_to(arm_linkage_2dof_t *arm, float x, float y){
     //math & var names: https://www.desmos.com/calculator/tu4fdwxru9
     float d = sqrt(x*x + y*y);
@@ -242,13 +260,17 @@ esp_err_t move_arm_to(arm_linkage_2dof_t *arm, float x, float y){
 
     ESP_LOGI(TAG, "theta1: %f, theta2: %f", theta1, theta2);
 
-    //move motors
-    ESP_ERROR_CHECK(move_motor_to(arm->m1, 1, theta1 * RAD_TO_DEG, false, xTaskGetCurrentTaskHandle()));
-    ESP_ERROR_CHECK(move_motor_to(arm->m2, 1, theta2 * RAD_TO_DEG, false, xTaskGetCurrentTaskHandle()));
+    return move_arm_to_angle(arm, theta1 * RAD_TO_DEG, theta2 * RAD_TO_DEG);
+}
 
-    //wait for both to complete
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-    return ESP_OK;
+void e_stop(motor_t *m){
+    atomic_store(&m->timer_params->can_move, false);
+    xSemaphoreTake(m->timer_params->move_lock, portMAX_DELAY);
+    m->timer_params->curr_steps = 0;
+    m->timer_params->curr_velocity = 0;
+    if(m->timer_params->calling_task_handle != NULL){
+        xTaskNotifyGive(m->timer_params->calling_task_handle);
+        m->timer_params->calling_task_handle = NULL;
+    }
+    xSemaphoreGive(m->timer_params->move_lock);
 }
